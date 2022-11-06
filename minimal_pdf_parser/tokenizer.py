@@ -323,7 +323,7 @@ class HexStringState(State):
 
 
 class PDFTokenizer:
-    """Tokenizer for an object"""
+    """Tokenizer for an obj"""
 
     @staticmethod
     def create(stream: BinaryIO) -> "PDFTokenizer":

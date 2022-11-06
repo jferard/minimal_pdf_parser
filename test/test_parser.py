@@ -6,8 +6,8 @@ from unittest import mock
 
 from minimal_pdf_parser.parser import PDFParser, ObjectParser, FontParser
 from minimal_pdf_parser.tokenizer import PDFTokenizer, BinaryStreamWrapper
-from minimal_pdf_parser.base import NameObject, ArrayObject, DictObject, \
-    IndirectRef, NumberObject
+from minimal_pdf_parser.base import (NameObject, ArrayObject, DictObject,
+                                     IndirectRef, NumberObject)
 from pdf_encodings import ENCODING_BY_NAME, UNICODE_BY_GLYPH_NAME
 
 FIXTURE_PATH = Path(__file__).parent.parent / "fixture"
@@ -26,7 +26,8 @@ class TestCase(unittest.TestCase):
         with (FIXTURE_PATH / "PDF32000_2008.pdf").open("rb") as s:
             parser = PDFParser(s)
             document = parser.parse()
-            print("\n".join(document.extract_text()))
+            text = "\n".join(document.extract_text())
+            print(text[-1000:])
 
     def test_parser_pypdf2(self):
         import PyPDF2
@@ -146,7 +147,10 @@ class FontParserTestCase(unittest.TestCase):
 
         tokenizer = PDFTokenizer.create(s)
         encoding_object = ObjectParser(tokenizer).parse()
-        encoding = FontParser(document, UNICODE_BY_GLYPH_NAME, ENCODING_BY_NAME).parse_encoding_object(encoding_object)
+        be = {}
+        encoding = FontParser(document, UNICODE_BY_GLYPH_NAME,
+                              ENCODING_BY_NAME)._apply_differences(
+            encoding_object, be)
         print(encoding)
 
 

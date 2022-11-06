@@ -61,12 +61,12 @@ class Encrypter:
         return ARC4_stream(key, s, d)
 
     def get_rc4_key(self, obj_num: int, gen_num: int) -> bytes:
-        # a)Obtain the object number and generation number from the object identifier of the string or stream to be
-        # encrypted (see 7.3.10, "Indirect Objects"). If the string is a direct object, use the identifier of the indirect
-        # object containing it.
-        # b)For all strings and streams without crypt filter specifier; treating the object number and generation number
+        # a)Obtain the obj number and generation number from the obj identifier of the string or stream to be
+        # encrypted (see 7.3.10, "Indirect Objects"). If the string is a direct obj, use the identifier of the indirect
+        # obj containing it.
+        # b)For all strings and streams without crypt filter specifier; treating the obj number and generation number
         # as binary integers, extend the original n-byte encryption key to n + 5 bytes by appending the low-order 3
-        # bytes of the object number and the low-order 2 bytes of the generation number in that order, low-order byte
+        # bytes of the obj number and the low-order 2 bytes of the generation number in that order, low-order byte
         # first. (n is 5 unless the value of V in the encryption dictionary is greater than 1, in which case n is the value
         # of Length divided by 8.)
         obj_num_bytes = struct.pack("<i", obj_num)[:3]
@@ -90,7 +90,7 @@ class Encrypter:
 
 class StandardEncrypterFactory:
     """
-    A translation from /Filter object
+    A translation from /Filter obj
     """
     def __init__(self, doc_id: List[bytes], version: int, revision_num: int,
                  length, permissions: int, hashed_owner_and_user_passwd: bytes,

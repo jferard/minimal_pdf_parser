@@ -5,9 +5,27 @@ from minimal_pdf_parser.base import (
     OpenArrayToken, CloseArrayToken, StringObject, ArrayObject)
 from minimal_pdf_parser.tokenizer import (PDFTokenizer, StreamWrapper)
 
-SetFont = NamedTuple("SetFont", [("name", bytes), ("size", int)])
+
+class SetFont:
+    def __init__(self, name: bytes, size: int):
+        self.name = name
+        self.size = size
+
+    def __repr__(self) -> str:
+        return "SetFont({}, {})".format(self.name, self.size)
+
+
 TextMatrix = NamedTuple("TextMatrix", [("matrix", List[List[NumberObject]])])
-Text = NamedTuple("Text", [("text", bytes)])
+
+
+class Text:
+    def __init__(self, text: bytes):
+        self.text = text
+
+    def __repr__(self) -> str:
+        return "Text({})".format(self.text)
+
+
 Td = NamedTuple("Td", [("tx", float), ("ty", float)])
 TD = NamedTuple("TD", [("tx", float), ("ty", float)])
 
@@ -70,7 +88,8 @@ class ContentParser:
                     yield TD(tx, ty)
                 elif token_bytes in (
                         b"B", b"BX",
-                        b"c", b"cs", b"CS", b"d", b"Do", b"EX", b"G", b"i", b"scn", b"SCN", b"re", b"f",
+                        b"c", b"cs", b"CS", b"d", b"Do", b"EX", b"G", b"i",
+                        b"scn", b"SCN", b"re", b"f",
                         b"g", b"h", b"j", b"J", b"l", b"m", b"M",
                         b"T", b"*", b"v", b"w", b"W", b"n", b"S", b"sh", b"y"
                 ):
@@ -82,38 +101,45 @@ class ContentParser:
             else:
                 stack.append(token)
 
-    def parse_to_unicode(self, stream_wrapper: StreamWrapper) -> Mapping[
-        int, str]:
+    def parse_to_unicode(self, stream_wrapper: StreamWrapper
+                         ) -> Mapping[int, str]:
+        """
+        9.7.5.4 CMap Example and Operator Summary
+
+        :param stream_wrapper:
+        :return:
+        """
         stack = []
 
-        n = 0
+        fchar_count = 0
+        frange_count = 0
         encoding = {}
         for token in PDFTokenizer(stream_wrapper):
             if isinstance(token, WordToken):
                 token_bytes = token.bs
                 if token_bytes == b"beginbfchar":
-                    n = checked_cast(NumberObject, stack[0]).value
+                    fchar_count = checked_cast(NumberObject, stack[0]).value
                 elif token_bytes == b"endbfchar":
-                    for i in range(0, n, 2):
+                    for i in range(0, fchar_count, 2):
                         first = checked_cast(StringObject, stack[i]).bs
                         second = checked_cast(StringObject, stack[i + 1]).bs
                         code = int.from_bytes(first, "big")
                         encoding[code] = second.decode("utf-16-be")
                 elif token_bytes == b"beginbfrange":
-                    n = checked_cast(NumberObject, stack[0]).value
+                    frange_count = checked_cast(NumberObject, stack[0]).value
                 elif token_bytes == b"endbfrange":
-                    for i in range(0, n, 3):
+                    for i in range(0, frange_count, 3):
                         first = checked_cast(StringObject, stack[i]).bs
                         second = checked_cast(StringObject, stack[i + 1]).bs
+                        third = stack[i + 2]
                         first_code = int.from_bytes(first, "big")
                         second_code = int.from_bytes(second, "big")
-                        third = stack[i + 2]
                         if isinstance(third, ArrayObject):
                             for code, value in enumerate(third, first_code):
                                 bs = checked_cast(StringObject, value).bs
                                 encoding[code] = bs.decode("utf-16-be")
                         elif isinstance(third, StringObject):
-                            cur_value = stack[i + 2].bs.decode("utf-16-be")
+                            cur_value = third.bs.decode("utf-16-be")
                             for code in range(first_code, second_code):
                                 encoding[code] = cur_value
                                 cur_value = chr(ord(cur_value) + 1)

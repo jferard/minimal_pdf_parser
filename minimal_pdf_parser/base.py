@@ -26,10 +26,29 @@ CloseDictToken = _CloseDictTokenClass()
 OpenArrayToken = _OpenArrayTokenClass()
 CloseArrayToken = _CloseArrayTokenClass()
 
-StringObject = NamedTuple("StringObject", [("bs", bytes)])
 
-NameObject = NamedTuple("NameObject", [("bs", bytes)])
-WordToken = NamedTuple("WordToken", [("bs", bytes)])
+class StringObject:
+    def __init__(self, bs: bytes):
+        self.bs = bs
+
+    def __repr__(self) -> str:
+        return "StringObject({})".format(self.bs)
+
+
+class NameObject:
+    def __init__(self, bs: bytes):
+        self.bs = bs
+
+    def __repr__(self) -> str:
+        return "NameObject({})".format(self.bs)
+
+
+class WordToken:
+    def __init__(self, bs: bytes):
+        self.bs = bs
+
+    def __repr__(self) -> str:
+        return "WordToken({})".format(self.bs)
 
 
 class ArrayObject:
@@ -48,7 +67,7 @@ class DictObject:
         self._d = d
 
     def __repr__(self) -> str:
-        return "DictObject(object={})".format(repr(self._d))
+        return "DictObject(obj={})".format(repr(self._d))
 
     def __getitem__(self, item):
         return self._d.__getitem__(item)
@@ -61,7 +80,7 @@ class DictObject:
 
 
 BooleanObject = NamedTuple("BooleanObject", [("value", bool)])
-NullObject = object()
+class NullObject: pass
 
 
 class NumberObject:
@@ -69,7 +88,7 @@ class NumberObject:
         self._bs = bs
 
     def __repr__(self) -> str:
-        return "NumberObject(bs={})".format(repr(self._bs))
+        return "NumberObject(text={})".format(repr(self._bs))
 
     @property
     def value(self) -> Union[int, float]:
@@ -97,9 +116,15 @@ class IndirectRef:
         return self._gen_num.value
 
 
-IndirectObject = NamedTuple("IndirectObject",
-                            [("obj_num", int), ("gen_num", int),
-                             ("object", Any)])
+class IndirectObject:
+    def __init__(self, obj_num: int, gen_num: int, object: Any):
+        self.obj_num = obj_num
+        self.gen_num = gen_num
+        self.object = object
+
+    def __repr__(self) -> str:
+        return "IndirectObject({}, {}, {})".format(
+            self.obj_num, self.gen_num, self.object)
 
 
 class StreamObject:

@@ -22,6 +22,10 @@ from minimal_pdf_parser.tokenizer import (
 
 BUF_SIZE = 40  # 96
 
+Encoding = Mapping[int, str]
+IndirectOrStreamObject = Union[IndirectObject, StreamObject]
+PDFObject = Union[NullObject, IndirectObject, StreamObject, DictObject]
+
 
 class StreamFactory:
     def create(self, stream: BinaryIO) -> BinaryIO:
@@ -56,14 +60,14 @@ class FontParser:
     _logger = logging.getLogger(__name__)
 
     def __init__(self, document: "PDFDocument",
-                 unicode_by_glyph_name: Mapping[str, str],
-                 encoding_by_name: Mapping[str, List[str]]):
+                 unicode_by_glyph_name: Mapping[bytes, str],
+                 encoding_by_name: Mapping[str, Encoding]):
         self._document = document
         self._unicode_by_glyph_name = unicode_by_glyph_name
         self._encoding_by_name = encoding_by_name
-        self._encoding_by_obj_num = cast(Dict[int, List[str]], {})
+        self._encoding_by_obj_num = cast(Dict[int, Encoding], {})
 
-    def parse(self, v: Any):
+    def parse(self, v: Any) -> Encoding:
         font_object = checked_cast(DictObject, self._document.get_object(v))
         if isinstance(font_object, IndirectRef):
             obj_num = font_object.obj_num
@@ -77,7 +81,7 @@ class FontParser:
         else:
             return self._parse_font_object(font_object)
 
-    def _parse_font_object(self, font_object: Any) -> List[str]:
+    def _parse_font_object(self, font_object: DictObject) -> Encoding:
         subtype = self._get_subtype(font_object)
         if subtype == b"/Type0":
             encoding = self._parse_type0_font(font_object)
@@ -90,18 +94,18 @@ class FontParser:
         self._logger.info("Encoding: %s", encoding)
         return encoding
 
-    def _get_subtype(self, object: DictObject) -> bytes:
+    def _get_subtype(self, obj: DictObject) -> bytes:
         try:
-            subtype_object = self._document.get_object(object[b"/Subtype"])
+            subtype_object = self._document.get_object(obj[b"/Subtype"])
         except KeyError:
             raise
         else:
             return cast(NameObject, subtype_object).bs
 
-    def _parse_type0_font(self, font_object: DictObject) -> List[str]:
+    def _parse_type0_font(self, font_object: DictObject) -> Encoding:
         try:
-             encoding_object = self._document.get_object(
-                 font_object[b"/Encoding"])
+            encoding_object_or_ref = font_object[b"/Encoding"]
+            encoding_object = self._document.get_object(encoding_object_or_ref)
         except KeyError:
             return STD_ENCODING
         else:
@@ -118,21 +122,11 @@ class FontParser:
                         encoding = ContentParser().parse_to_unicode(
                             to_unicode_stream_wrapper)
                         self._logger.info("To Unicode: %s", encoding)
-                        return encoding
+                        return encoding  # TODO apply to base encoding
                     except KeyError:
                         raise
             elif isinstance(encoding_object, DictObject):
-                encoding_object = cast(DictObject, encoding_object)
-                self._check_type(encoding_object)
-                try:
-                    base_encoding_object = self._document.get_object(
-                        encoding_object[b"/BaseEncoding"])
-                except KeyError:
-                    base_encoding = STD_ENCODING
-                else:
-                    base_encoding_name = cast(NameObject,
-                                              base_encoding_object).bs
-                    base_encoding = ENCODING_BY_NAME.get(base_encoding_name, [])
+                base_encoding = self._get_base1_encoding(encoding_object)
                 return self._apply_differences(encoding_object, base_encoding)
             else:
                 raise ValueError()
@@ -146,13 +140,13 @@ class FontParser:
             type_name = cast(NameObject, type_object).bs
             assert type_name == b"/Encoding"
 
-    def _parse_type1_font(self, font_object: DictObject) -> List[str]:
+    def _parse_type1_font(self, font_object: DictObject) -> Encoding:
         """
         9.6.2 Type 1 Fonts
         """
         try:
-             encoding_object = self._document.get_object(
-                 font_object[b"/Encoding"])
+            encoding_object = self._document.get_object(
+                font_object[b"/Encoding"])
         except KeyError:
             # try with b"/ToUnicode"
             return STD_ENCODING
@@ -167,9 +161,9 @@ class FontParser:
             else:
                 raise ValueError()
 
-     # BaseFont
+    # BaseFont
 
-    def _get_base1_encoding(self, encoding_object):
+    def _get_base1_encoding(self, encoding_object) -> Encoding:
         encoding_object = cast(DictObject, encoding_object)
         self._check_type(encoding_object)
         try:
@@ -182,13 +176,13 @@ class FontParser:
             base_encoding = ENCODING_BY_NAME.get(base_encoding_name, [])
         return base_encoding
 
-    def _parse_truetype_font(self, font_object: DictObject) -> List[str]:
+    def _parse_truetype_font(self, font_object: DictObject) -> Encoding:
         """
         9.6.3 TrueType Fonts
         """
         try:
-             encoding_object = self._document.get_object(
-                 font_object[b"/Encoding"])
+            encoding_object = self._document.get_object(
+                font_object[b"/Encoding"])
         except KeyError:
             # try with b"/ToUnicode"
             return STD_ENCODING
@@ -199,19 +193,19 @@ class FontParser:
                 return encoding
             elif isinstance(encoding_object, DictObject):
                 base_encoding = self._get_base1_encoding(encoding_object)
+                self._logger.error("TODO enc %s", base_encoding)  # TODO
             else:
                 raise ValueError()
 
-
     def _apply_differences(self, encoding_object: DictObject,
-                           base_encoding: List[str]) -> List[str]:
+                           base_encoding: Encoding) -> Encoding:
         try:
             differences = self._document.get_object(
                 encoding_object[b"/Differences"])
         except KeyError:
-            encoding = base_encoding
+            return base_encoding
         else:
-            encoding = list(base_encoding)
+            encoding = dict(base_encoding)
             differences_array = cast(ArrayObject, differences)
             i = 0
             for element in differences_array:
@@ -219,11 +213,12 @@ class FontParser:
                     i = element.value
                 elif isinstance(element, NameObject):
                     element_name = element.bs
-                    encoding[i] = self._unicode_by_glyph_name.get(element_name, '\ufffd')
+                    encoding[i] = self._unicode_by_glyph_name.get(element_name,
+                                                                  '\ufffd')
                     i += 1
                 else:
                     raise ValueError()
-        return encoding
+            return encoding
 
 
 class PDFDocument:
@@ -270,7 +265,8 @@ class PDFDocument:
                 PDFDocument._logger.debug("Contents: %s",
                                           self.get_object(contents))
                 stream_wrapper = self.get_stream(contents)
-                cur_encoding = None
+                cur_encoding = None  # TODO
+                self._logger.error("TODO enc %s", cur_encoding)
                 # should know the fonts
 
                 encoding = STD_ENCODING
@@ -281,35 +277,37 @@ class PDFDocument:
                             raise ValueError(repr(encoding_by_ref))
                     elif isinstance(x, Text):
                         try:
-                            text = "".join(encoding[y] for y in x.text)
+                            text = "".join(
+                                encoding.get(y, '\ufffd') for y in x.text)
                             yield text
                         except (IndexError, KeyError):
-                            self._logger.exception("%s %s", repr(x.text), encoding)
+                            self._logger.exception("%s %s", repr(x.text),
+                                                   encoding)
                     else:
                         self._logger.debug("Ignore %s", x)
 
     def get_root_object(self):
         return self.get_object(self.root)
 
-    def get_object(self, obj: Any) -> Any:
+    def get_object(self, obj: Union[IndirectRef, PDFObject]) -> PDFObject:
         """
-        Deref the object if necessary
+        Deref the obj if necessary
 
-        :param obj: the object or a ref
-        :return: the object
+        :param obj: the obj or a ref.
+        :return: the obj
         """
         if isinstance(obj, IndirectRef):
             return self.deref_object(obj)
         else:
             return obj
 
-    def deref_object(self, obj):
+    def deref_object(self, obj: IndirectRef) -> PDFObject:
         try:
             return self._get_indirect_object(obj).object
         except KeyError:
             return NullObject
 
-    def _handle_fonts(self, kid_object) -> Mapping[bytes, List[str]]:
+    def _handle_fonts(self, kid_object) -> Mapping[bytes, Encoding]:
         encoding_by_ref = {}
         resources = kid_object[b"/Resources"]  # 7.8.3
         for k, v in resources.get(b"/Font", {}).items():
@@ -331,15 +329,16 @@ class PDFDocument:
 
     def _get_pages_kids(self):
         root_object = self.get_root_object()
-        PDFDocument._logger.debug("Root object %s", root_object)
+        PDFDocument._logger.debug("Root obj %s", root_object)
         pages_object = self.get_object(root_object[b"/Pages"])
-        PDFDocument._logger.debug("Pages object %s", pages_object)
+        PDFDocument._logger.debug("Pages obj %s", pages_object)
         kids = checked_cast(ArrayObject,
                             self.get_object(pages_object[b"/Kids"]))
         return kids
 
-    def _get_indirect_object(self, ref: IndirectRef) -> Union[
-        IndirectObject, StreamObject]:
+    def _get_indirect_object(self, ref: IndirectRef
+                             ) -> IndirectOrStreamObject:
+        """Convert a ref to an indirect object or a stream object"""
         obj_num = ref.obj_num
         try:
             return self._obj_by_num[obj_num]
@@ -351,15 +350,14 @@ class PDFDocument:
         return obj
 
     def read_indirect_object(self, byte_offset: int
-                             ) -> Union[IndirectObject, StreamObject]:
+                             ) -> IndirectOrStreamObject:
         self._offsets.append(self.parser.tell())
         self.parser.seek(byte_offset)
         obj_num, gen_num = map(int, self.parser.read_obj_line())
-        obj = self.parser.read_object()  # TODO: create tokenizer ? TODO: encrypter
-        endobj_word = self.parser.read_endobj_line()
-        if not endobj_word:
-            endobj_word = self.parser.read_endobj_line()
-        if endobj_word == b"stream":
+        # TODO: create tokenizer ? TODO: encrypter
+        obj = self.parser.read_object()
+        endobj_word = self._read_endobj_word()
+        if endobj_word == b"stream":  # open a stream
             start, length = self._read_stream(obj)
             ret = StreamObject(obj_num, gen_num, obj, start, length)
         elif endobj_word == b"endobj":
@@ -370,6 +368,12 @@ class PDFDocument:
         byte_offset = self._offsets.pop()
         self.parser.seek(byte_offset)
         return ret
+
+    def _read_endobj_word(self):
+        endobj_word = self.parser.read_endobj_line()
+        if not endobj_word:  # sometimes just a void line
+            endobj_word = self.parser.read_endobj_line()
+        return endobj_word
 
     def _read_stream(self, obj: Any) -> Tuple[int, int]:
         start = self.parser.tell()
@@ -391,7 +395,8 @@ class PDFDocument:
                          encryption: DictObject) -> StandardEncrypterFactory:
         """
         Table 20 – Entries common to all encryption dictionaries
-        Table 21 – Additional encryption dictionary entries for the standard security handler
+        Table 21 – Additional encryption dictionary entries for the standard
+        security handler
 
         Example:
 
@@ -434,6 +439,7 @@ class PDFDocument:
             stmf = checked_cast(NameObject, encryption[b"/StmF"]).bs
             strf = checked_cast(NameObject, encryption[b"/StrF"]).bs
             eff = checked_cast(NameObject, encryption[b"/EFF"]).bs
+            self._logger.debug("Version 4: %s, %s, %s, %s", cf, stmf, strf, eff)
 
         raise Exception(str(version))
 
