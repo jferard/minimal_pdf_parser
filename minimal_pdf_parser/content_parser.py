@@ -1,105 +1,29 @@
-from typing import NamedTuple, cast, List, Iterator, Union, Any, Mapping
+from typing import Iterator, Mapping
 
-from minimal_pdf_parser.base import (
-    NameObject, WordToken, checked_cast, NumberObject, check,
-    OpenArrayToken, CloseArrayToken, StringObject, ArrayObject)
-from minimal_pdf_parser.tokenizer import (PDFTokenizer, StreamWrapper)
-
-
-class SetFont:
-    def __init__(self, name: bytes, size: int):
-        self.name = name
-        self.size = size
-
-    def __repr__(self) -> str:
-        return "SetFont({}, {})".format(self.name, self.size)
-
-
-TextMatrix = NamedTuple("TextMatrix", [("matrix", List[List[NumberObject]])])
-
-
-class Text:
-    def __init__(self, text: bytes):
-        self.text = text
-
-    def __repr__(self) -> str:
-        return "Text({})".format(self.text)
-
-
-Td = NamedTuple("Td", [("tx", float), ("ty", float)])
-TD = NamedTuple("TD", [("tx", float), ("ty", float)])
-
+from base import (NumberObject,
+    WordToken, checked_cast, StringObject, ArrayObject)
+from tokenizer import (PDFTokenizer, StreamWrapper)
+from pdf_operator import *
 
 class ContentParser:
+    _logger = logging.getLogger(__name__)
+
     def parse_content(self, stream_wrapper: StreamWrapper
-                      ) -> Iterator[Union[SetFont, Text, TextMatrix, Td]]:
-        stack = []
+                      ) -> Iterator[Operation]:
+        stack = TokenStack()
 
         # See : Table A.1 – PDF content stream operators
         for token in PDFTokenizer(stream_wrapper):
             if isinstance(token, WordToken):
                 token_bytes = token.bs
-                if token_bytes == b"cm":
-                    a, b, c, d, e, f = stack
-                    # print("Modify matrix {}".format([[a, b, 0], [c, d, 0], [e, f, 1]]))
-                elif token_bytes == b"q":
-                    pass
-                    # print("Save G perm")
-                elif token_bytes == b"Q":
-                    pass
-                    # print("Restore G perm")
-                elif token_bytes == b"BDC":  # marked content
-                    stack = []
-                elif token_bytes == b"EMC":  # end marked content
-                    stack = []
-                elif token_bytes == b"BT":  # begin text
-                    stack = []
-                elif token_bytes == b"ET":  # end text
-                    stack = []
-                elif token_bytes == b"gs":  # set graphic state
-                    stack = []
-                elif token_bytes == b"Tc":  # character spacing
-                    stack = []
-                elif token_bytes == b"Tw":  # word spacing
-                    stack = []
-                elif token_bytes == b"Tf":  # font
-                    font_name_object, size = stack
-                    yield SetFont(checked_cast(NameObject, font_name_object).bs,
-                                  checked_cast(NumberObject, size).value)
-                elif token_bytes == b"Tm":  # text matrix
-                    a, b, c, d, e, f = stack
-                    yield TextMatrix([[a, b, 0], [c, d, 0], [e, f, 1]])
-                elif token_bytes == b"Tj":  # text
-                    string_obj, = stack
-                    yield Text(string_obj.bs)
-                elif token_bytes == b"TJ":
-                    array_obj = stack
-                    check(array_obj[0] == OpenArrayToken, "")
-                    check(array_obj[-1] == CloseArrayToken, "")
-                    tokens = cast(List[StringObject],
-                                  [t for t in array_obj[1:-1] if
-                                   isinstance(t, StringObject)])
-                    yield Text(b"".join(t.bs for t in tokens))
-                elif token_bytes == b"Td":
-                    tx, ty = stack
-                    yield Td(tx, ty)
-                elif token_bytes == b"TD":
-                    tx, ty = stack
-                    yield TD(tx, ty)
-                elif token_bytes in (
-                        b"B", b"BX",
-                        b"c", b"cs", b"CS", b"d", b"Do", b"EX", b"G", b"i",
-                        b"scn", b"SCN", b"re", b"f",
-                        b"g", b"h", b"j", b"J", b"l", b"m", b"M",
-                        b"T", b"*", b"v", b"w", b"W", b"n", b"S", b"sh", b"y"
-                ):
-                    pass
-                else:
-                    raise ValueError("Invalid content token {}".format(token))
-
-                stack = []
+                try:
+                    operator = operator_by_token_bytes[token_bytes]
+                    for operation in operator.build(stack):
+                        yield operation
+                except KeyError:
+                    self._logger.warning("Unk token name %s", token_bytes)
             else:
-                stack.append(token)
+                stack.push(token)
 
     def parse_to_unicode(self, stream_wrapper: StreamWrapper
                          ) -> Mapping[int, str]:
@@ -150,3 +74,5 @@ class ContentParser:
             else:
                 stack.append(token)
         return encoding
+
+

@@ -7,16 +7,17 @@ from typing import (
     Iterable
 )
 
-from minimal_pdf_parser.base import (
+from base import (
     OpenDictToken, CloseDictToken, OpenArrayToken, CloseArrayToken,
     StringObject, NameObject, WordToken, ArrayObject, DictObject, BooleanObject,
     NullObject, IndirectRef, IndirectObject, StreamObject, get_num, get_string,
     check, checked_cast, NumberObject
 )
-from minimal_pdf_parser.content_parser import ContentParser, Text, SetFont
-from minimal_pdf_parser.pdf_encodings import STD_ENCODING, ENCODING_BY_NAME
-from minimal_pdf_parser.security import StandardEncrypterFactory, Encrypter
-from minimal_pdf_parser.tokenizer import (
+from content_parser import ContentParser
+from pdf_operation import SetFont, ShowTextString
+from pdf_encodings import STD_ENCODING, ENCODING_BY_NAME
+from security import StandardEncrypterFactory, Encrypter
+from tokenizer import (
     PDFTokenizer, XrefEntry, BinaryStreamWrapper, LINE_FEED, CARRIAGE_RETURN,
     _bytes_to_string, StreamWrapper)
 
@@ -75,23 +76,31 @@ class FontParser:
                 return self._encoding_by_obj_num[obj_num]
             except KeyError:
                 font_object = self._document.deref_object(font_object)
-                encoding = self._parse_font_object(font_object)
+                encoding = self.parse_font_object(font_object)
                 self._encoding_by_obj_num[obj_num] = encoding
                 return encoding
         else:
-            return self._parse_font_object(font_object)
+            return self.parse_font_object(font_object)
 
-    def _parse_font_object(self, font_object: DictObject) -> Encoding:
+    def parse_font_object(self, font_object: DictObject) -> Encoding:
         subtype = self._get_subtype(font_object)
+        # Table 110 – Font types
         if subtype == b"/Type0":
             encoding = self._parse_type0_font(font_object)
         elif subtype == b"/Type1":
             encoding = self._parse_type1_font(font_object)
+        elif subtype == b"/MMType1":
+            raise NotImplementedError(subtype)
+        elif subtype == b"/Type3":
+            raise NotImplementedError(subtype)
         elif subtype == b"/TrueType":
             encoding = self._parse_truetype_font(font_object)
+        elif subtype == b"/CIDFontType0":
+            raise NotImplementedError(subtype)
+        elif subtype == b"/CIDFontType2":
+            raise NotImplementedError(subtype)
         else:
-            raise ValueError()
-        self._logger.info("Encoding: %s", encoding)
+            raise ValueError(subtype)
         return encoding
 
     def _get_subtype(self, obj: DictObject) -> bytes:
@@ -251,7 +260,7 @@ class PDFDocument:
         kids = self._get_pages_kids()
         stack = list(kids)
         while stack:
-            kid = stack.pop(0)
+            kid = stack.pop()
             kid_object = self.get_object(kid)
             PDFDocument._logger.debug("Examine kid: %s", kid_object)
             try:
@@ -265,9 +274,6 @@ class PDFDocument:
                 PDFDocument._logger.debug("Contents: %s",
                                           self.get_object(contents))
                 stream_wrapper = self.get_stream(contents)
-                cur_encoding = None  # TODO
-                self._logger.error("TODO enc %s", cur_encoding)
-                # should know the fonts
 
                 encoding = STD_ENCODING
                 for x in ContentParser().parse_content(stream_wrapper):
@@ -275,13 +281,14 @@ class PDFDocument:
                         encoding = encoding_by_ref.get(x.name, STD_ENCODING)
                         if not encoding:
                             raise ValueError(repr(encoding_by_ref))
-                    elif isinstance(x, Text):
+                    elif isinstance(x, ShowTextString):
                         try:
                             text = "".join(
-                                encoding.get(y, '\ufffd') for y in x.text)
+                                encoding.get(y, '\ufffd') for y in x.bs) # todo : TWO BYTES, EG. "� " = " "
+                            self._logger.info("Text %s", text)
                             yield text
                         except (IndexError, KeyError):
-                            self._logger.exception("%s %s", repr(x.text),
+                            self._logger.exception("%s %s", repr(x.bs),
                                                    encoding)
                     else:
                         self._logger.debug("Ignore %s", x)
@@ -312,6 +319,7 @@ class PDFDocument:
         resources = kid_object[b"/Resources"]  # 7.8.3
         for k, v in resources.get(b"/Font", {}).items():
             encoding = self._font_parser.parse(v)
+            self._logger.info("Encoding %s: %s", k, encoding)
             encoding_by_ref[k] = encoding
         return encoding_by_ref
 
@@ -699,4 +707,4 @@ class ObjectParser:
                     return obj
 
             else:
-                assert False, repr(token)
+                assert False, "{} {} {}".format(repr(token), token.__class__, OpenDictToken.__class__)

@@ -22,12 +22,13 @@ class TestCase(unittest.TestCase):
                 print(t)
 
     def test_parser2(self):
-        logging.basicConfig(level=logging.DEBUG)
+        logging.basicConfig(level=logging.DEBUG, filename="test2.log", filemode="w")
         with (FIXTURE_PATH / "PDF32000_2008.pdf").open("rb") as s:
             parser = PDFParser(s)
             document = parser.parse()
-            text = "\n".join(document.extract_text())
-            print(text[-1000:])
+            with (FIXTURE_PATH / "PDF32000_2008.txt").open("w") as d:
+                for text in document.extract_text():
+                    d.write(text + "\n")
 
     def test_parser_pypdf2(self):
         import PyPDF2

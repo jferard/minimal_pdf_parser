@@ -175,5 +175,5 @@ T = TypeVar('T')
 
 
 def checked_cast(typ: Type[T], val: Any) -> T:
-    check(isinstance(val, typ), "Expected type {} for value {}", typ, val)
+    check(isinstance(val, typ), "Expected type {} for value {} ({})", typ, val, type(val))
     return cast(typ, val)

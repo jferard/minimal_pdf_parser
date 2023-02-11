@@ -2,7 +2,7 @@ import struct
 from abc import ABC, abstractmethod
 from typing import NamedTuple, BinaryIO, cast, Any, Iterator
 
-from minimal_pdf_parser.base import (
+from base import (
     OpenDictToken, CloseDictToken, OpenArrayToken, CloseArrayToken,
     StringObject, NameObject, WordToken, NumberObject)
 
@@ -83,6 +83,7 @@ N_LOWER = 0x6E
 R_LOWER = 0x72
 T_LOWER = 0x74
 Z_LOWER = 0x7A
+STAR = 0x2A
 
 # Tokens and objects
 
@@ -296,7 +297,7 @@ class WordState(State):
         self._cs = [c]
 
     def handle(self, tokenizer: "PDFTokenizer", c: int):
-        if A_LOWER <= c <= Z_LOWER or A_UPPER <= c <= Z_UPPER:
+        if A_LOWER <= c <= Z_LOWER or A_UPPER <= c <= Z_UPPER or c == STAR:
             self._cs.append(c)
         else:
             tokenizer.unget()
